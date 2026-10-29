@@ -1,0 +1,325 @@
+{
+  "info": {
+    "_postman_id": "d037451d-59ca-4fd8-858f-009dfd3763c4",
+    "name": "Payment Processing Simulator",
+    "description": "Smoke dan alur transaksi simulator pembayaran lokal. Gunakan hanya PAN dan CVV kartu uji; koleksi ini tidak menghubungi payment gateway nyata.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "merchantId", "value": "merchant_demo" },
+    { "key": "transactionId", "value": "" },
+    { "key": "voidTransactionId", "value": "" },
+    { "key": "authorizeKey", "value": "postman-authorize-approved" },
+    { "key": "captureKey", "value": "postman-capture-partial" },
+    { "key": "refundPartialKey", "value": "postman-refund-partial" },
+    { "key": "refundRemainingKey", "value": "postman-refund-remaining" },
+    { "key": "voidAuthorizeKey", "value": "postman-authorize-void" },
+    { "key": "voidKey", "value": "postman-void" }
+  ],
+  "item": [
+    {
+      "name": "1. Health check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/healthz"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Health check returns 200 and status ok', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().status).to.eql('ok');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Authorize approved card",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{authorizeKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 150000,\n  \"currency\": \"IDR\",\n  \"card\": {\n    \"number\": \"4111111111111111\",\n    \"exp_month\": 12,\n    \"exp_year\": 2030,\n    \"cvv\": \"123\"\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/v1/transactions/authorize"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Authorization is approved and card data is masked', function () {",
+              "    pm.response.to.have.status(201);",
+              "    const transaction = pm.response.json();",
+              "    pm.expect(transaction.status).to.eql('AUTHORIZED');",
+              "    pm.expect(transaction.card.last4).to.eql('1111');",
+              "    pm.expect(pm.response.text()).not.to.include('4111111111111111');",
+              "    pm.expect(pm.response.text()).not.to.include('\"cvv\"');",
+              "    pm.collectionVariables.set('transactionId', transaction.id);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Retry authorize (same key and body)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{authorizeKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 150000,\n  \"currency\": \"IDR\",\n  \"card\": {\n    \"number\": \"4111111111111111\",\n    \"exp_month\": 12,\n    \"exp_year\": 2030,\n    \"cvv\": \"123\"\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/v1/transactions/authorize"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Retry returns the previously created transaction', function () {",
+              "    pm.response.to.have.status(201);",
+              "    const transaction = pm.response.json();",
+              "    pm.expect(transaction.id).to.eql(pm.collectionVariables.get('transactionId'));",
+              "    pm.expect(transaction.status).to.eql('AUTHORIZED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Reuse authorize key with different body (expect 422)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{authorizeKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 140000,\n  \"currency\": \"IDR\",\n  \"card\": {\n    \"number\": \"4111111111111111\",\n    \"exp_month\": 12,\n    \"exp_year\": 2030,\n    \"cvv\": \"123\"\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/v1/transactions/authorize"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Different body with reused key is rejected', function () {",
+              "    pm.response.to.have.status(422);",
+              "    pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_KEY_REUSED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Capture partially (IDR 75,000)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{captureKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 75000,\n  \"currency\": \"IDR\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/v1/transactions/{{transactionId}}/capture"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Partial capture succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const transaction = pm.response.json();",
+              "    pm.expect(transaction.status).to.eql('CAPTURED');",
+              "    pm.expect(transaction.captured_amount.amount).to.eql(75000);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Refund partially (IDR 25,000)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{refundPartialKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 25000,\n  \"currency\": \"IDR\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/v1/transactions/{{transactionId}}/refund"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Partial refund succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const transaction = pm.response.json();",
+              "    pm.expect(transaction.status).to.eql('PARTIALLY_REFUNDED');",
+              "    pm.expect(transaction.refunded_amount.amount).to.eql(25000);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Refund remaining amount (IDR 50,000)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{refundRemainingKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 50000,\n  \"currency\": \"IDR\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/v1/transactions/{{transactionId}}/refund"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Remaining refund completes transaction', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const transaction = pm.response.json();",
+              "    pm.expect(transaction.status).to.eql('REFUNDED');",
+              "    pm.expect(transaction.refunded_amount.amount).to.eql(75000);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Authorize second transaction for void",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{voidAuthorizeKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 50000,\n  \"currency\": \"IDR\",\n  \"card\": {\n    \"number\": \"4111111111111111\",\n    \"exp_month\": 12,\n    \"exp_year\": 2030,\n    \"cvv\": \"123\"\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/v1/transactions/authorize"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Second authorization is ready to void', function () {",
+              "    pm.response.to.have.status(201);",
+              "    const transaction = pm.response.json();",
+              "    pm.expect(transaction.status).to.eql('AUTHORIZED');",
+              "    pm.collectionVariables.set('voidTransactionId', transaction.id);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Void authorized transaction",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" },
+          { "key": "Idempotency-Key", "value": "{{voidKey}}" }
+        ],
+        "url": "{{baseUrl}}/v1/transactions/{{voidTransactionId}}/void"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Void succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().status).to.eql('VOIDED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Get refunded transaction",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Merchant-ID", "value": "{{merchantId}}" }
+        ],
+        "url": "{{baseUrl}}/v1/transactions/{{transactionId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Transaction lookup returns refunded transaction', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().status).to.eql('REFUNDED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

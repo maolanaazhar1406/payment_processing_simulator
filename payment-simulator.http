@@ -1,0 +1,54 @@
+@baseUrl = http://localhost:8080
+@merchant = merchant_demo
+@transactionId = replace-with-transaction-id
+
+### Health
+GET {{baseUrl}}/healthz
+
+### Authorize
+POST {{baseUrl}}/v1/transactions/authorize
+Content-Type: application/json
+X-Merchant-ID: {{merchant}}
+Idempotency-Key: auth-demo-1
+
+{
+  "amount": 150000,
+  "currency": "IDR",
+  "card": {
+    "number": "4111111111111111",
+    "exp_month": 12,
+    "exp_year": 2030,
+    "cvv": "123"
+  }
+}
+
+### Capture
+POST {{baseUrl}}/v1/transactions/{{transactionId}}/capture
+Content-Type: application/json
+X-Merchant-ID: {{merchant}}
+Idempotency-Key: capture-demo-1
+
+{
+  "amount": 100000,
+  "currency": "IDR"
+}
+
+### Refund
+POST {{baseUrl}}/v1/transactions/{{transactionId}}/refund
+Content-Type: application/json
+X-Merchant-ID: {{merchant}}
+Idempotency-Key: refund-demo-1
+
+{
+  "amount": 100000,
+  "currency": "IDR"
+}
+
+### Void
+POST {{baseUrl}}/v1/transactions/{{transactionId}}/void
+X-Merchant-ID: {{merchant}}
+Idempotency-Key: void-demo-1
+
+### Get transaction
+GET {{baseUrl}}/v1/transactions/{{transactionId}}
+X-Merchant-ID: {{merchant}}
